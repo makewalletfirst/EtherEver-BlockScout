@@ -1,0 +1,151 @@
+version: '3.9'
+
+services:
+  redis-db:
+    extends:
+      file: ./services/redis.yml
+      service: redis-db
+
+  db-init:
+    extends:
+      file: ./services/db.yml
+      service: db-init
+
+  db:
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/db.yml
+      service: db
+
+  backend:
+    depends_on:
+      - db
+      - redis-db
+    extends:
+      file: ./services/backend.yml
+      service: backend
+    user: root
+    links:
+      - db:database
+    environment:
+      # --- [핵심 설정] ---
+      # Core-geth(ETC)는 geth 호환 모드 사용
+      ETHEREUM_JSONRPC_VARIANT: 'geth'
+      # Docker Host IP (Linux 기준)
+      ETHEREUM_JSONRPC_HTTP_URL: http://172.17.0.1:8545/
+      ETHEREUM_JSONRPC_TRACE_URL: http://172.17.0.1:8545/
+      ETHEREUM_JSONRPC_WS_URL: ws://172.17.0.1:8546/
+      CHAIN_ID: '9999'
+      # -----------------
+      # [수정됨] services/db.yml에 적힌 아이디와 비밀번호 적용
+      # 형식: postgresql://아이디:비밀번호@db:5432/DB이름?ssl=false
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@db:5432/blockscout?ssl=false
+
+      # Rust 검증기 끄기 (오류 방지)
+      MICROSERVICE_SC_VERIFIER_ENABLED: 'false'
+
+      # ▼▼▼▼▼ [여기 추가!] ▼▼▼▼▼
+      # 1. 백엔드야, 통계 마이크로서비스 기능을 켜라.
+      MICROSERVICE_STATS_ENABLED: 'true'
+
+      # 2. 통계 담당자는 바로 'stats' 컨테이너(8080포트)다.
+      MICROSERVICE_STATS_URL: 'http://stats:8050/api'
+      # ▲▲▲▲▲ [여기까지] ▲▲▲▲▲
+
+
+  # 시각화 도구 등 부가 기능
+  visualizer:
+    extends:
+      file: ./services/visualizer.yml
+      service: visualizer
+
+  sig-provider:
+    extends:
+      file: ./services/sig-provider.yml
+      service: sig-provider
+
+  frontend:
+    depends_on:
+      - backend
+    extends:
+      file: ./services/frontend.yml
+      service: frontend
+    environment:
+      # 프론트엔드에서도 체인 정보 필요
+      NEXT_PUBLIC_NETWORK_ID: '9999'
+      NEXT_PUBLIC_NETWORK_NAME: 'EtherEver'
+
+      # 1. 메인 앱 주소 (호스트와 프로토콜 분리됨)
+      NEXT_PUBLIC_APP_HOST: '25.26.119.84:4000'
+      NEXT_PUBLIC_APP_PROTOCOL: 'http'
+
+      # 2. API 주소 (호스트와 프로토콜 분리됨)
+      NEXT_PUBLIC_API_HOST: '25.26.119.84:4000'
+      NEXT_PUBLIC_API_PROTOCOL: 'http'
+
+      # 3. 통계 API 주소 (▼▼▼ 여기가 수정됨: http:// 필수! ▼▼▼)
+      NEXT_PUBLIC_STATS_API_HOST: 'http://25.26.119.84:4000'
+
+
+      # 내부 SSR용 (이건 건드리지 마세요. 잘 작동 중입니다)
+      API_URL: 'http://backend:4000'
+      STATS_API_URL: 'http://stats:8050'
+
+
+  stats-db-init:
+    extends:
+      file: ./services/stats.yml
+      service: stats-db-init
+
+  stats-db:
+    depends_on:
+      stats-db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/stats.yml
+      service: stats-db
+
+  stats:
+    depends_on:
+      - stats-db
+      - backend
+    extends:
+      file: ./services/stats.yml
+      service: stats
+    # ▼▼▼▼▼ [여기부터 수정/추가] ▼▼▼▼▼
+    environment:
+      # 1. 밖으로 나가지 말고 내부 backend 컨테이너 4000번 포트로 직행해라
+      STATS__BLOCKSCOUT_API_URL: http://backend:4000
+
+      # 2. (혹시 모르니) DB 비밀번호 명시
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@stats-db:5432/blockscout?ssl=false
+
+    # 3. 리눅스에서 host.docker.internal을 인식시키는 마법의 주문 (필수)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # ▲▲▲▲▲ [여기까지] ▲▲▲▲▲
+
+  user-ops-indexer:
+    depends_on:
+      - db
+      - backend
+    extends:
+      file: ./services/user-ops-indexer.yml
+      service: user-ops-indexer
+    environment:
+      # [추가] 인덱서도 동일한 DB 비밀번호가 필요할 수 있어 안전하게 추가함
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@db:5432/blockscout?ssl=false
+
+  proxy:
+    depends_on:
+      - backend
+      - frontend
+      - stats
+    extends:
+      file: ./services/nginx.yml
+      service: proxy
+    # 포트는 nginx.yml에서 직접 수정했으므로 여기서는 주석 처리 유지
+    # ports:
+    #   - "4000:80"
