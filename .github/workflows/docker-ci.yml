@@ -1,0 +1,53 @@
+name: Docker Build Check
+
+# main 브랜치에 push되거나 pull request가 올 때 실행
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. 코드 가져오기
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2. .env 파일 생성 (Blockscout는 환경변수 파일이 없으면 에러날 수 있음)
+    # .env.example이 있다면 복사해서 .env로 만듭니다.
+    - name: Create .env file
+      run: |
+        if [ -f .env.common ]; then
+          cp .env.common .env
+        elif [ -f .env.example ]; then
+          cp .env.example .env
+        else
+          echo "No example env file found, creating dummy .env"
+          touch .env
+        fi
+
+    # 3. Docker Compose 설정 파일 문법 검사
+    - name: Check Docker Compose Config
+      run: docker compose config
+
+    # 4. 빌드 및 실행 테스트 (Detached 모드로 실행)
+    # 주의: Blockscout 빌드가 너무 오래 걸리면 여기서 타임아웃 날 수도 있습니다.
+    # 단순히 켜지는지 볼 거면 빌드 캐시를 쓰거나 이미지를 당겨오는 게 좋지만,
+    # 일단 기본 빌드 테스트를 돌려봅니다.
+    - name: Test Docker Compose Up
+      run: docker compose up -d --build
+
+    # 5. 컨테이너가 죽지 않고 살아있는지 확인 (단순 체크)
+    - name: Check Running Containers
+      run: |
+        sleep 10
+        docker compose ps
+        if [ $(docker compose ps -q | wc -l) -gt 0 ]; then
+          echo "Containers are running!"
+        else
+          echo "No containers running!"
+          exit 1
+        fi
