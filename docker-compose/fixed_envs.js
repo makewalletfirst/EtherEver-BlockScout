@@ -26,5 +26,6 @@ window.__envs = {
   NEXT_PUBLIC_NETWORK_LOGO_DARK: "https://raw.githubusercontent.com/makewalletfirst/image/main/etherever/etherever-logo.png",
   // === [접힌 메뉴 & 탭 아이콘 (정사각형 이미지 권장)] ===
   NEXT_PUBLIC_NETWORK_ICON: "https://raw.githubusercontent.com/makewalletfirst/image/main/etherever/etherever-logo.png",
-  NEXT_PUBLIC_NETWORK_ICON_DARK: "https://raw.githubusercontent.com/makewalletfirst/image/main/etherever/etherever-logo.png"
+  NEXT_PUBLIC_NETWORK_ICON_DARK: "https://raw.githubusercontent.com/makewalletfirst/image/main/etherever/etherever-logo.png",
+  NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: "4e370f289849e5b62758ea3d964bab24"
 }
