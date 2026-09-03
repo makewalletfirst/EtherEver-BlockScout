@@ -1,0 +1,5 @@
+*.bak-*
+update_stats.sh
+*.log
+logs/
+*.bak-*

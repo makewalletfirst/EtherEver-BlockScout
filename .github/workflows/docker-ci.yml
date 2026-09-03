@@ -1,0 +1,60 @@
+name: Docker Build Check
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate docker-compose config + asset integrity
+    runs-on: ubuntu-latest
+
+    # 모든 명령은 docker-compose/ 안에서 실행
+    defaults:
+      run:
+        working-directory: ./docker-compose
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # docker-compose 폴더 자체가 있어야 진행 가능
+      - name: Verify required files
+        run: |
+          set -e
+          for f in docker-compose.yml fixed_envs.js update_stats.sh; do
+            if [ ! -f "$f" ]; then
+              echo "::error::missing required file: docker-compose/$f"
+              exit 1
+            fi
+            echo "✓ $f ($(stat -c %s "$f") bytes)"
+          done
+
+      # .env 가 없으면 example 또는 dummy 로 생성 (docker compose config 가 요구)
+      - name: Create .env file
+        run: |
+          if [ -f .env ]; then
+            echo ".env already present"
+          elif [ -f .env.common ]; then
+            cp .env.common .env
+          elif [ -f .env.example ]; then
+            cp .env.example .env
+          elif [ -d envs ] && [ -f envs/common-blockscout.env ]; then
+            cp envs/common-blockscout.env .env
+          else
+            echo "No example env file found, creating dummy .env"
+            touch .env
+          fi
+
+      # docker compose config — yaml 문법 + 환경변수 보간 검증.
+      # 실제 build/up 은 시간·자원 큼 → CI 에서 생략 (수동 또는 별도 workflow)
+      - name: Validate docker compose config
+        run: docker compose config --quiet
+
+      - name: Workspace integrity OK
+        run: |
+          echo "EtherEver BlockScout docker-compose definition validated."
+          echo "GitHub Action successfully validated the workspace."

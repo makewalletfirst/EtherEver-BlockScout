@@ -1,0 +1,166 @@
+version: '3.9'
+
+services:
+  redis-db:
+    extends:
+      file: ./services/redis.yml
+      service: redis-db
+
+  db-init:
+    extends:
+      file: ./services/db.yml
+      service: db-init
+
+  db:
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/db.yml
+      service: db
+
+  backend:
+    depends_on:
+      - db
+      - redis-db
+    extends:
+      file: ./services/backend.yml
+      service: backend
+    user: root
+    links:
+      - db:database
+    environment:
+      # --- [핵심 설정] ---
+      ETHEREUM_JSONRPC_VARIANT: 'geth'
+      ETHEREUM_JSONRPC_HTTP_URL: http://172.17.0.1:8545/
+      ETHEREUM_JSONRPC_WS_URL: ws://172.17.0.1:8546/
+      
+      ETHEREUM_JSONRPC_TRACE_URL: ""
+      CHAIN_ID: '9999'
+
+      # ▼▼▼ [여기 아래에 추가하세요] ▼▼▼
+      # 내부 트랜잭션 추적 비활성화 (CPU 부하 감소 및 debug_trace 에러 방지)
+      INDEXER_DISABLE_INTERNAL_TRANSACTIONS: 'true'
+      ECT_FETCH_INTERNAL_TRANSACTIONS: 'false'
+      # ▲▲▲ [추가 완료] ▲▲▲
+
+      # ▼▼▼ [ETE 통화 단위 변경 설정] ▼▼▼
+      COIN: 'ETE'
+      COIN_NAME: 'EtherEver'
+      DISABLE_EXCHANGE_RATES: 'true'
+      # ▲▲▲ [추가 완료] ▲▲▲
+
+      # DB 설정
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@db:5432/blockscout?ssl=false
+
+      # Rust 검증기 끄기
+      MICROSERVICE_SC_VERIFIER_ENABLED: 'false'
+
+      # [통계 서비스 내부 연결]
+      MICROSERVICE_STATS_ENABLED: 'true'
+      MICROSERVICE_STATS_URL: 'http://stats:8050/api'
+    
+    # [수정] extra_hosts는 서비스 안에 위치해야 함
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # 시각화 도구 등 부가 기능
+  visualizer:
+    extends:
+      file: ./services/visualizer.yml
+      service: visualizer
+
+  sig-provider:
+    extends:
+      file: ./services/sig-provider.yml
+      service: sig-provider
+
+  frontend:
+    depends_on:
+      - backend
+    extends:
+      file: ./services/frontend.yml
+      service: frontend
+    environment:
+      # 프론트엔드에서도 체인 정보 필요
+      NEXT_PUBLIC_NETWORK_ID: '9999'
+      NEXT_PUBLIC_NETWORK_NAME: 'EtherEver'
+      
+      # ▼▼▼ [프론트엔드 표시 단위 변경] ▼▼▼
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: 'ETE'
+      # ▲▲▲ [추가 완료] ▲▲▲
+
+      # ▼▼▼ [수정 후: 접속하는 실제 공인 주소로 변경] ▼▼▼
+      NEXT_PUBLIC_APP_HOST: '163.239.27.33:4552'
+      NEXT_PUBLIC_APP_PROTOCOL: 'http'
+      
+      NEXT_PUBLIC_API_HOST: '163.239.27.33:4552'
+      NEXT_PUBLIC_API_PROTOCOL: 'http'
+
+
+      # 3. [핵심 수정] 통계 API는 8050번 포트로 '직통' 연결
+      NEXT_PUBLIC_STATS_API_HOST: 'http://163.239.27.33:4552/stats_api'
+
+      # 내부 SSR용 주소
+      API_URL: 'http://backend:4000'
+      STATS_API_URL: 'http://stats:8050'
+
+  stats-db-init:
+    extends:
+      file: ./services/stats.yml
+      service: stats-db-init
+
+  stats-db:
+    depends_on:
+      stats-db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/stats.yml
+      service: stats-db
+
+  stats:
+    depends_on:
+      - stats-db
+      - backend
+    extends:
+      file: ./services/stats.yml
+      service: stats
+    # [핵심 수정] 외부에서 직접 접속할 수 있게 8050 포트 개방
+    ports:
+      - "8050:8050"
+    environment:
+      # 1. 내부 backend 연결
+      STATS__BLOCKSCOUT_API_URL: http://backend:4000
+
+      # 2. DB 비밀번호
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@stats-db:5432/blockscout?ssl=false
+
+      # 1. 주소와 포트는 합쳐서 적어야 합니다.
+      STATS__SERVER__HTTP__ADDR: '0.0.0.0:8050'
+
+      # 2. CORS 설정은 'cors' 섹션 안에 넣어야 합니다. (__CORS__ 추가)
+      STATS__SERVER__HTTP__CORS__ENABLED: 'true'
+      STATS__SERVER__HTTP__CORS__ALLOWED_ORIGIN: '*'
+
+    # [수정] extra_hosts를 stats 서비스 안으로 이동 (들여쓰기 주의)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  user-ops-indexer:
+    depends_on:
+      - db
+      - backend
+    extends:
+      file: ./services/user-ops-indexer.yml
+      service: user-ops-indexer
+    environment:
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@db:5432/blockscout?ssl=false
+
+  proxy:
+    depends_on:
+      - backend
+      - frontend
+      - stats
+    extends:
+      file: ./services/nginx.yml
+      service: proxy

@@ -1,0 +1,165 @@
+version: '3.4'
+
+services:
+  redis-db:
+    extends:
+      file: ./services/redis.yml
+      service: redis-db
+
+  db-init:
+    extends:
+      file: ./services/db.yml
+      service: db-init
+
+  db:
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/db.yml
+      service: db
+
+  backend:
+    # [수정됨] 방금 빌드한 커스텀 이미지를 사용
+    #image: my-blockscout:custom
+    image: silverruler/etherever-blockscout:v1.1
+    # 이제 인터넷에서 받아와야 하므로 pull_policy: never는 삭제하거나 주석 처리
+    # [수정됨] Docker Hub에서 찾지 않고 로컬 이미지를 강제로 사용
+    #pull_policy: never
+
+    depends_on:
+      - db
+      - redis-db
+    extends:
+      file: ./services/backend.yml
+      service: backend
+    user: root
+    links:
+      - db:database
+    environment:
+      #BLOCK_REWARDS: '{"0": "2000000000000000000"}'
+
+      BLOCK_REWARDS: '{"0": "2000000000000000000"}'
+
+      # === [RPC 설정] ===
+      ETHEREUM_JSONRPC_VARIANT: 'geth'
+      ETHEREUM_JSONRPC_HTTP_URL: http://172.17.0.1:8545/
+      ETHEREUM_JSONRPC_WS_URL: ws://172.17.0.1:8546/
+      CHAIN_ID: '58051'
+  
+      # === [내부 트랜잭션 끄기] ===
+      INDEXER_DISABLE_INTERNAL_TRANSACTIONS: 'true'
+      ECT_FETCH_INTERNAL_TRANSACTIONS: 'false'
+  
+      # === [토큰 인덱싱 활성화 + 멀티시그 이벤트만 차단] ===
+      INDEXER_TOKEN_TRANSFERS_ENABLE: 'true'
+      INDEXER_TOKEN_BALANCES_FETCHER_ENABLED: 'true'
+      INDEXER_DISABLE_TOKEN_INSTANCE_FETCHER: 'false'
+  
+      # 멀티시그 Deposit 이벤트만 무시
+      INDEXER_LOGS_FIRST_TOPIC_BLACKLIST: '0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c'
+
+      # === [최적화 설정] ===
+      INDEXER_CATCHUP_BLOCK_INTERVAL: '10'
+      ECT_RPC_BLOCK_BATCH_SIZE: '10'
+      INDEXER_CATCHUP_CONCURRENCY: '20'
+      ETHEREUM_JSONRPC_HTTP_POOL_SIZE: '100'
+      INDEXER_DISABLE_ADDRESS_COIN_BALANCE_UPDATE: 'true'
+      INDEXER_DISABLE_PENDING_TRANSACTIONS: 'true'
+      ECT_FETCH_PENDING_TRANSACTIONS: 'false'
+
+      # === [통화 설정] ===
+      COIN: 'ETE'
+      COIN_NAME: 'EtherEver'
+      DISABLE_EXCHANGE_RATES: 'true'
+
+      # === [DB 설정] ===
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@db:5432/blockscout?ssl=false
+
+      # === [기타] ===
+      MICROSERVICE_SC_VERIFIER_ENABLED: 'false'
+      MICROSERVICE_STATS_ENABLED: 'true'
+      MICROSERVICE_STATS_URL: 'http://stats:8050/api'
+
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  visualizer:
+    extends:
+      file: ./services/visualizer.yml
+      service: visualizer
+
+  sig-provider:
+    extends:
+      file: ./services/sig-provider.yml
+      service: sig-provider
+
+  frontend:
+    depends_on:
+      - backend
+    extends:
+      file: ./services/frontend.yml
+      service: frontend
+    environment:
+      NEXT_PUBLIC_NETWORK_ID: '58051'
+      NEXT_PUBLIC_NETWORK_NAME: 'EtherEver'
+      NEXT_PUBLIC_IS_TESTNET: 'false'
+      NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: 'ETE'
+      NEXT_PUBLIC_APP_HOST: '163.239.27.33:4552'
+      NEXT_PUBLIC_APP_PROTOCOL: 'http'
+      NEXT_PUBLIC_API_HOST: '163.239.27.33:4552'
+      NEXT_PUBLIC_API_PROTOCOL: 'http'
+      NEXT_PUBLIC_STATS_API_HOST: 'http://163.239.27.33:4552/stats_api'
+      API_URL: 'http://backend:4000'
+      STATS_API_URL: 'http://stats:8050'
+
+  stats-db-init:
+    extends:
+      file: ./services/stats.yml
+      service: stats-db-init
+
+  stats-db:
+    depends_on:
+      stats-db-init:
+        condition: service_completed_successfully
+    extends:
+      file: ./services/stats.yml
+      service: stats-db
+
+  stats:
+    depends_on:
+      - stats-db
+      - backend
+    extends:
+      file: ./services/stats.yml
+      service: stats
+    ports:
+      - "8050:8050"
+    environment:
+      STATS__BLOCKSCOUT_API_URL: http://backend:4000
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@stats-db:5432/blockscout?ssl=false
+      STATS__SERVER__HTTP__ADDR: '0.0.0.0:8050'
+      STATS__SERVER__HTTP__CORS__ENABLED: 'true'
+      STATS__SERVER__HTTP__CORS__ALLOWED_ORIGIN: '*'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  user-ops-indexer:
+    depends_on:
+      - db
+      - backend
+    extends:
+      file: ./services/user-ops-indexer.yml
+      service: user-ops-indexer
+    environment:
+      DATABASE_URL: postgresql://blockscout:ceWb1MeLBEeOIfk65gU8EjF8@db:5432/blockscout?ssl=false
+
+  proxy:
+    depends_on:
+      - backend
+      - frontend
+      - stats
+    extends:
+      file: ./services/nginx.yml
+      service: proxy
